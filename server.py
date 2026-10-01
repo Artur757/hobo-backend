@@ -15,7 +15,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Инициализация SQLite базы данных
 def init_db():
     conn = sqlite3.connect("hobo_database.db")
     cursor = conn.cursor()
@@ -44,7 +43,7 @@ class SyncData(BaseModel):
     name: str
     money: float
     rankIdx: int
-    referrer_id: Optional[int] = None  # Исправлена ошибка валидации (разрешен null)
+    referrer_id: Optional[int] = None
     delta_earned: float = 0.0
 
 @app.post("/api/sync")
@@ -106,7 +105,7 @@ def raid_player(attacker_id: int):
     
     if not attacker:
         conn.close()
-        raise HTTPException(400, "Игрок не найден в базе. Сначала накопите денег.")
+        raise HTTPException(400, "Игрок не найден в базе.")
         
     cursor.execute("SELECT * FROM players WHERE rankIdx = ? AND user_id != ? AND money > 100", (attacker["rankIdx"], attacker_id))
     targets = cursor.fetchall()
