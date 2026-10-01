@@ -2,6 +2,7 @@ import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 import random
 
 app = FastAPI(title="Hobo Empire API")
@@ -35,7 +36,7 @@ init_db()
 
 def get_db_connection():
     conn = sqlite3.connect("hobo_database.db")
-    conn.row_factory = sqlite3.Row # Позволяет обращаться к колонкам по имени
+    conn.row_factory = sqlite3.Row
     return conn
 
 class SyncData(BaseModel):
@@ -43,7 +44,7 @@ class SyncData(BaseModel):
     name: str
     money: float
     rankIdx: int
-    referrer_id: int = None
+    referrer_id: Optional[int] = None  # Исправлена ошибка валидации (разрешен null)
     delta_earned: float = 0.0
 
 @app.post("/api/sync")
@@ -51,7 +52,6 @@ def sync_player(data: SyncData):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Сохраняем или обновляем игрока в базе
     cursor.execute("SELECT * FROM players WHERE user_id = ?", (data.user_id,))
     player = cursor.fetchone()
     
@@ -61,13 +61,11 @@ def sync_player(data: SyncData):
             VALUES (?, ?, ?, ?, ?, 0)
         ''', (data.user_id, data.name, data.money, data.rankIdx, data.referrer_id))
     else:
-        # Обновляем только если у игрока стало больше денег (защита от потери при перезапуске клиента)
         if data.money > player["money"] or data.rankIdx > player["rankIdx"]:
             cursor.execute('''
                 UPDATE players SET name = ?, money = ?, rankIdx = ? WHERE user_id = ?
             ''', (data.name, data.money, data.rankIdx, data.user_id))
         
-    # Начисляем 10% рефоводу
     if data.referrer_id and data.delta_earned > 0:
         cursor.execute('''
             UPDATE players SET ref_bonus = ref_bonus + ? WHERE user_id = ?
@@ -75,7 +73,6 @@ def sync_player(data: SyncData):
         
     conn.commit()
     
-    # Получаем актуальный бонус для ответа
     cursor.execute("SELECT ref_bonus FROM players WHERE user_id = ?", (data.user_id,))
     current_bonus = cursor.fetchone()["ref_bonus"]
     conn.close()
@@ -109,9 +106,8 @@ def raid_player(attacker_id: int):
     
     if not attacker:
         conn.close()
-        raise HTTPException(400, "Attacker not found")
+        raise HTTPException(400, "Игрок не найден в базе. Сначала накопите денег.")
         
-    # Ищем всех игроков ТАКОГО ЖЕ РАНГА с деньгами
     cursor.execute("SELECT * FROM players WHERE rankIdx = ? AND user_id != ? AND money > 100", (attacker["rankIdx"], attacker_id))
     targets = cursor.fetchall()
     
@@ -136,13 +132,10 @@ def raid_player(attacker_id: int):
         conn.close()
         return {"success": True, "is_win": False, "target_name": target["name"], "loot": -penalty, "message": f"{target['name']} дал отпор! Вы потеряли {penalty} ₽."}
 
-# НОВЫЙ ЭНДПОИНТ: ГЛОБАЛЬНЫЙ ЛИДЕРБОРД
 @app.get("/api/leaderboard")
 def get_leaderboard():
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Получаем ТОП-100 богачей
     cursor.execute("SELECT user_id, name, money, rankIdx FROM players ORDER BY money DESC LIMIT 100")
     top_players = cursor.fetchall()
     conn.close()
@@ -155,7 +148,6 @@ def get_leaderboard():
             "money": p["money"],
             "rankIdx": p["rankIdx"]
         })
-        
     return {"leaders": leaders}
 
 if __name__ == "__main__":
